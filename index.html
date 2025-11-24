@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Configurador da Vinha</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+}
+</script>
+</head>
+<body>
+<header>
+  <h1>🌱 Configurador da Vinha</h1>
+  <p>Master → Transmissores BLE</p>
+</header>
+<section class="box">
+  <h2>1️⃣ Conectar ao Master</h2>
+  <button id="btnMaster" class="btn-main">🔵 Conectar Master (BLE)</button>
+  <label>MAC do Master:</label>
+  <input id="masterMac" readonly placeholder="Aguardando conexão...">
+</section>
+<section class="box">
+  <h2>2️⃣ Configurar Transmissor</h2>
+  <button id="btnTx" class="btn-secondary">🟢 Configurar Transmissor</button>
+</section>
+<section class="box">
+  <h2>📋 Log</h2>
+  <div id="log"></div>
+</section>
+<script src="app.js"></script>
+</body>
+</html>
