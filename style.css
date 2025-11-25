@@ -28,15 +28,26 @@ h2 { margin-top:0; color:#444; font-size:18px; }
   border:none;
   border-radius:10px;
   margin-top:10px;
+  cursor:pointer;
+  transition:opacity 0.2s ease;
 }
 .btn-main { background:#1E88E5; }
 .btn-secondary { background:#43A047; }
+button:disabled {
+  opacity:0.6;
+  cursor:not-allowed;
+}
 input {
   width:100%;
   padding:10px;
   margin-top:10px;
   border-radius:8px;
   border:1px solid #aaa;
+}
+.hint {
+  margin:8px 0 0;
+  font-size:13px;
+  color:#666;
 }
 #log {
   height:200px;

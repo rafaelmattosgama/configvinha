@@ -6,23 +6,63 @@ const TX_PREFIX      = "TX-";
 
 const masterMacInput = document.getElementById("masterMac");
 const logDiv = document.getElementById("log");
+const btnMaster = document.getElementById("btnMaster");
+const btnTx = document.getElementById("btnTx");
 
-function log(msg) {
-    logDiv.textContent += msg + "\n";
+const formatNow = () => new Date().toLocaleTimeString();
+
+const log = (msg, isError = false) => {
+    const prefix = isError ? "❌" : "";
+    logDiv.textContent += `[${formatNow()}] ${prefix} ${msg}\n`;
     logDiv.scrollTop = logDiv.scrollHeight;
-}
+};
+
+const setLoading = (button, loading) => {
+    if (!button) return;
+    button.disabled = loading;
+    button.textContent = loading ? "⏳ Aguarde..." : button.dataset.label;
+};
+
+const ensureBluetooth = () => {
+    if (!navigator.bluetooth) {
+        const message = "Web Bluetooth não é suportado neste navegador/dispositivo.";
+        alert(message);
+        log(message, true);
+        btnMaster.disabled = true;
+        btnTx.disabled = true;
+        return false;
+    }
+    return true;
+};
+
+const ensureGeolocation = () => {
+    if (!navigator.geolocation) {
+        const message = "Geolocalização não suportada neste navegador.";
+        log(message, true);
+        return false;
+    }
+    return true;
+};
 
 async function getGPS() {
+    if (!ensureGeolocation()) return null;
+
     return new Promise((resolve) => {
         navigator.geolocation.getCurrentPosition(
             pos => resolve({lat: pos.coords.latitude, lon: pos.coords.longitude}),
-            ()  => resolve(null),
+            (err)  => {
+                const message = err?.message || "Não foi possível obter a localização (permita o acesso ou tente novamente).";
+                log(message, true);
+                resolve(null);
+            },
             { enableHighAccuracy:true, timeout:8000 }
         );
     });
 }
 
-document.getElementById("btnMaster").onclick = async () => {
+btnMaster.onclick = async () => {
+    if (!ensureBluetooth()) return;
+    setLoading(btnMaster, true);
     try {
         log("🔍 Procurando MASTER...");
         const device = await navigator.bluetooth.requestDevice({
@@ -37,11 +77,15 @@ document.getElementById("btnMaster").onclick = async () => {
         masterMacInput.value = mac;
         log("✔ MASTER conectado: " + mac);
     } catch (e) {
-        log("Erro ao conectar MASTER: " + e);
+        log("Erro ao conectar MASTER: " + e, true);
+    } finally {
+        setLoading(btnMaster, false);
     }
 };
 
-document.getElementById("btnTx").onclick = async () => {
+btnTx.onclick = async () => {
+    if (!ensureBluetooth()) return;
+    setLoading(btnTx, true);
     try {
         const masterMac = masterMacInput.value.trim();
         if (!masterMac) return alert("Conecte ao MASTER primeiro.");
@@ -54,7 +98,8 @@ document.getElementById("btnTx").onclick = async () => {
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(TX_SERVICE);
         const charac  = await service.getCharacteristic(TX_CHAR);
-        const name = prompt("Nome do transmissor:", device.name);
+        const promptName = prompt("Nome do transmissor:", device.name) || device.name || "TX";
+        const name = promptName.trim() || "TX";
         const gps = await getGPS();
         const payload = {
             masterMac: masterMac,
@@ -66,6 +111,17 @@ document.getElementById("btnTx").onclick = async () => {
         await charac.writeValue(new TextEncoder().encode(JSON.stringify(payload)));
         log("✔ Transmissor configurado!");
     } catch (e) {
-        log("Erro TX: " + e);
+        log("Erro TX: " + e, true);
+    } finally {
+        setLoading(btnTx, false);
     }
 };
+
+// Define labels para restaurar texto original após loading
+[btnMaster, btnTx].forEach((btn) => {
+    if (btn) {
+        btn.dataset.label = btn.textContent;
+    }
+});
+
+ensureBluetooth();
