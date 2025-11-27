@@ -88,25 +88,35 @@ btnTx.onclick = async () => {
   setLoading(btnTx, true);
   try {
     const masterMac = masterMacInput.value.trim();
-    if (!masterMac) return alert("Conecte ao MASTER primeiro.");
+    if (!masterMac) {
+      log("[ERRO] Conecte ao MASTER primeiro.", true);
+      return;
+    }
 
     // Validate MAC address format
     const macRegex = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
     if (!macRegex.test(masterMac)) {
-      alert("MAC inválido. Certifique-se de usar o formato XX:XX:XX:XX:XX:XX.");
+      log("[ERRO] MAC inválido. Certifique-se de usar o formato XX:XX:XX:XX:XX:XX.", true);
       return;
     }
 
-    log("Procurando transmissor...");
+    log("[APP] Procurando transmissor...");
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: TX_PREFIX }],
       optionalServices: [TX_SERVICE],
     });
 
-    log("Conectando TX...");
+    log(`[APP] Dispositivo encontrado: ${device.name}`);
+
+    log("[APP] Conectando ao transmissor...");
     const server = await device.gatt.connect();
+    log("[APP] Conexão BLE estabelecida.");
+
     const service = await server.getPrimaryService(TX_SERVICE);
+    log(`[APP] Serviço BLE obtido: ${TX_SERVICE}`);
+
     const charac = await service.getCharacteristic(TX_CHAR);
+    log(`[APP] Característica BLE obtida: ${TX_CHAR}`);
 
     const promptName = prompt("Nome do transmissor:", device.name) || device.name || "TX";
     const name = promptName.trim() || "TX";
@@ -117,11 +127,11 @@ btnTx.onclick = async () => {
     const lonStr = gps && gps.lon != null ? gps.lon : "";
     const payload = `${masterMac};${name};${latStr};${lonStr}`;
 
-    log("Enviando: " + payload);
+    log(`[APP] Enviando dados: ${payload}`);
     await charac.writeValue(new TextEncoder().encode(payload));
-    log("Transmissor configurado!");
+    log("[APP] Dados enviados com sucesso!");
   } catch (e) {
-    log("Erro TX: " + e, true);
+    log(`[ERRO] Falha na comunicação BLE: ${e}`, true);
   } finally {
     setLoading(btnTx, false);
   }

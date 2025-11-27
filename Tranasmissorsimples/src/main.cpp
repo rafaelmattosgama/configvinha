@@ -75,7 +75,13 @@ bool parseConfigString(const String &s, String &macStr, String &nome, float &lat
 }
 
 void carregarConfig() {
-  prefs.begin("vinhaTX", true);
+  Serial.println("Carregando configuração...");
+
+  if (!prefs.begin("vinhaTX", true)) {
+    Serial.println("[ERRO] Falha ao abrir namespace NVS. Certifique-se de que a memória flash está funcionando corretamente.");
+    hasConfig = false;
+    return;
+  }
 
   hasConfig    = prefs.getBool("hasCfg", false);
   masterMacStr = prefs.getString("masterMac", "");
@@ -98,7 +104,12 @@ void carregarConfig() {
 }
 
 void salvarConfig() {
-  prefs.begin("vinhaTX", false);
+  Serial.println("Salvando configuração...");
+
+  if (!prefs.begin("vinhaTX", false)) {
+    Serial.println("[ERRO] Falha ao abrir namespace NVS para escrita. Verifique a memória flash.");
+    return;
+  }
 
   prefs.putBool("hasCfg", true);
   prefs.putString("masterMac", masterMacStr);
@@ -117,7 +128,7 @@ class ConfigCallback : public NimBLECharacteristicCallbacks {
     std::string value = pCharacteristic->getValue();
     String s(value.c_str());
 
-    Serial.print("[BLE] Recebido: ");
+    Serial.print("[BLE] Dados recebidos: ");
     Serial.println(s);
 
     String macStr, nome;
@@ -158,15 +169,22 @@ void iniciarBLEConfig() {
   NimBLEDevice::init("TX-VINHA");
 
   NimBLEServer *server = NimBLEDevice::createServer();
+  Serial.println("[BLE] Servidor BLE criado.");
+
   NimBLEService *service = server->createService(TX_SERVICE_UUID);
+  Serial.println("[BLE] Serviço BLE criado com UUID: " + String(TX_SERVICE_UUID));
 
   configCharacteristic = service->createCharacteristic(
     TX_CHAR_UUID,
     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
   );
+  Serial.println("[BLE] Característica BLE criada com UUID: " + String(TX_CHAR_UUID));
 
   configCharacteristic->setCallbacks(new ConfigCallback());
+  Serial.println("[BLE] Callback configurado para a característica.");
+
   service->start();
+  Serial.println("[BLE] Serviço BLE iniciado.");
 
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(TX_SERVICE_UUID);
