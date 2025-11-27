@@ -90,6 +90,13 @@ btnTx.onclick = async () => {
     const masterMac = masterMacInput.value.trim();
     if (!masterMac) return alert("Conecte ao MASTER primeiro.");
 
+    // Validate MAC address format
+    const macRegex = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+    if (!macRegex.test(masterMac)) {
+      alert("MAC inválido. Certifique-se de usar o formato XX:XX:XX:XX:XX:XX.");
+      return;
+    }
+
     log("Procurando transmissor...");
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: TX_PREFIX }],
