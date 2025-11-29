@@ -194,6 +194,8 @@ class ConfigCallback : public NimBLECharacteristicCallbacks {
       s += (char)data[i];
     }
 
+    Serial.println("[LOG] Dados convertidos para string: " + s);
+
     logPacoteRecebido(s);
 
     String macStr, nome;
@@ -356,7 +358,7 @@ void loop() {
       return;
     }
 
-    delay(50);
+    delay(1000);
     return;
   }
 

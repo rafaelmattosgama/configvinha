@@ -127,12 +127,13 @@ btnTx.onclick = async () => {
     const lonStr = gps && gps.lon != null ? gps.lon : "";
     const payload = `${masterMac};${name};${latStr};${lonStr}`;
 
-    log(`[APP] Enviando dados: ${payload}`);
+    log(`[APP] Dados preparados para envio: ${payload}`);
 
     // Converter a string para um buffer binário
     const encoder = new TextEncoder();
     const binaryPayload = encoder.encode(payload);
 
+    log(`[APP] Enviando dados binários: ${Array.from(binaryPayload).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
     await charac.writeValue(binaryPayload);
     log("[APP] Dados enviados com sucesso!");
   } catch (e) {
