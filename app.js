@@ -64,20 +64,29 @@ btnMaster.onclick = async () => {
   if (!ensureBluetooth()) return;
   setLoading(btnMaster, true);
   try {
-    log("Procurando MASTER...");
+    log("[APP] Procurando MASTER...");
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ services: [MASTER_SERVICE] }],
     });
-    log("Conectando...");
+
+    log(`[APP] Dispositivo MASTER encontrado: ${device.name}`);
+
+    log("[APP] Conectando ao MASTER...");
     const server = await device.gatt.connect();
+    log("[APP] Conexão BLE com MASTER estabelecida.");
+
     const service = await server.getPrimaryService(MASTER_SERVICE);
+    log(`[APP] Serviço BLE do MASTER obtido: ${MASTER_SERVICE}`);
+
     const charac = await service.getCharacteristic(MASTER_CHAR);
+    log(`[APP] Característica BLE do MASTER obtida: ${MASTER_CHAR}`);
+
     const value = await charac.readValue();
     const mac = new TextDecoder().decode(value);
     masterMacInput.value = mac;
-    log("MASTER conectado: " + mac);
+    log(`[APP] MASTER conectado com sucesso. MAC: ${mac}`);
   } catch (e) {
-    log("Erro ao conectar MASTER: " + e, true);
+    log(`[ERRO] Falha ao conectar ao MASTER: ${e}`, true);
   } finally {
     setLoading(btnMaster, false);
   }
