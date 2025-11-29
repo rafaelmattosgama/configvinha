@@ -3,6 +3,8 @@
 #include <DHT.h>
 #include <Preferences.h>
 #include <NimBLEDevice.h>
+#include <nvs_flash.h>
+#include <EEPROM.h>
 
 //////////////////////////// PINOS ////////////////////////////
 #define DHTPIN 22
@@ -74,62 +76,125 @@ bool parseConfigString(const String &s, String &macStr, String &nome, float &lat
   return true;
 }
 
+#define EEPROM_SIZE 64  // Tamanho da EEPROM
+
+void salvarMACNaEEPROM(const uint8_t mac[6]) {
+    for (int i = 0; i < 6; i++) {
+        EEPROM.write(i, mac[i]);
+    }
+    EEPROM.commit();
+    Serial.println("MAC salvo na EEPROM.");
+}
+
+bool carregarMACDaEEPROM(uint8_t mac[6]) {
+    for (int i = 0; i < 6; i++) {
+        mac[i] = EEPROM.read(i);
+    }
+
+    // Verificar se o MAC é válido (não vazio)
+    for (int i = 0; i < 6; i++) {
+        if (mac[i] != 0xFF) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void carregarConfig() {
   Serial.println("Carregando configuração...");
 
-  if (!prefs.begin("vinhaTX", true)) {
-    Serial.println("[ERRO] Falha ao abrir namespace NVS. Certifique-se de que a memória flash está funcionando corretamente.");
-    hasConfig = false;
-    return;
-  }
-
-  hasConfig    = prefs.getBool("hasCfg", false);
-  masterMacStr = prefs.getString("masterMac", "");
-  sensorName   = prefs.getString("nome", "");
-  latitudeCfg  = prefs.getFloat("lat", 0.0);
-  longitudeCfg = prefs.getFloat("lon", 0.0);
-
-  prefs.end();
-
-  if (hasConfig && parseMacString(masterMacStr, receptorMAC)) {
-    Serial.println("Config encontrada:");
-    Serial.println("Master MAC: " + masterMacStr);
-    Serial.println("Nome: " + sensorName);
-    Serial.print("Lat: "); Serial.println(latitudeCfg);
-    Serial.print("Lon: "); Serial.println(longitudeCfg);
+  if (carregarMACDaEEPROM(receptorMAC)) {
+      hasConfig = true;
+      Serial.println("Config encontrada na EEPROM:");
+      Serial.print("Master MAC: ");
+      for (int i = 0; i < 6; i++) {
+          Serial.printf("%02X:", receptorMAC[i]);
+      }
+      Serial.println();
   } else {
-    Serial.println("Nenhuma configuração existente.");
-    hasConfig = false;
+      Serial.println("Nenhuma configuração existente na EEPROM.");
+      hasConfig = false;
   }
 }
 
 void salvarConfig() {
   Serial.println("Salvando configuração...");
 
-  if (!prefs.begin("vinhaTX", false)) {
-    Serial.println("[ERRO] Falha ao abrir namespace NVS para escrita. Verifique a memória flash.");
-    return;
-  }
+  if (masterMacStr.length() > 0 && parseMacString(masterMacStr, receptorMAC)) {
+        salvarMACNaEEPROM(receptorMAC);
+        Serial.println("Config SALVA com sucesso na EEPROM!");
+    } else {
+        Serial.println("[ERRO] Falha ao salvar configuração. MAC inválido.");
+    }
+}
 
-  prefs.putBool("hasCfg", true);
-  prefs.putString("masterMac", masterMacStr);
-  prefs.putString("nome",      sensorName);
-  prefs.putFloat("lat",        latitudeCfg);
-  prefs.putFloat("lon",        longitudeCfg);
+//////////////////// LOGS DETALHADOS //////////////////////////
+void logEstadoMemoria() {
+    Serial.println("[LOG] Verificando estado da memória EEPROM...");
+    uint8_t mac[6];
+    if (carregarMACDaEEPROM(mac)) {
+        Serial.print("[LOG] MAC encontrado na EEPROM: ");
+        for (int i = 0; i < 6; i++) {
+            Serial.printf("%02X:", mac[i]);
+        }
+        Serial.println();
+    } else {
+        Serial.println("[LOG] Nenhum MAC encontrado na EEPROM.");
+    }
+}
 
-  prefs.end();
+void logPacoteRecebido(const String &s) {
+    Serial.println("[LOG] Pacote recebido via BLE:");
+    Serial.println(s);
+}
 
-  Serial.println("Config SALVA com sucesso!");
+void logConfigSalva() {
+    Serial.println("[LOG] Configuração salva na EEPROM com sucesso.");
+}
+
+//////////////////// LOGS DE CONEXÃO BLE //////////////////////////
+void logBLEConexao() {
+    Serial.println("[LOG] Verificando conexão BLE...");
+    if (NimBLEDevice::getServer()->getConnectedCount() > 0) {
+        Serial.println("[LOG] Dispositivo conectado via BLE.");
+    } else {
+        Serial.println("[LOG] Nenhum dispositivo conectado via BLE.");
+    }
+}
+
+//////////////////// CONFIGURAR MTU //////////////////////////
+void configurarMTU() {
+    NimBLEDevice::setMTU(256); // Define o MTU para suportar pacotes maiores
+    Serial.println("[LOG] MTU configurado para 256 bytes.");
 }
 
 //////////////////// CALLBACK BLE ////////////////////////////
 class ConfigCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic *pCharacteristic) {
-    std::string value = pCharacteristic->getValue();
-    String s(value.c_str());
+    Serial.println("[LOG] Callback BLE acionado. Verificando pacote recebido...");
 
-    Serial.print("[BLE] Dados recebidos: ");
-    Serial.println(s);
+    std::string value = pCharacteristic->getValue();
+    const uint8_t *data = reinterpret_cast<const uint8_t *>(value.data());
+    size_t length = value.length();
+
+    if (length == 0) {
+      Serial.println("[ERRO] Pacote recebido está vazio.");
+      return;
+    }
+
+    Serial.printf("[LOG] Pacote recebido com %d bytes:\n", length);
+    for (size_t i = 0; i < length; i++) {
+      Serial.printf("%02X ", data[i]);
+    }
+    Serial.println();
+
+    // Converter os dados binários para string
+    String s = "";
+    for (size_t i = 0; i < length; i++) {
+      s += (char)data[i];
+    }
+
+    logPacoteRecebido(s);
 
     String macStr, nome;
     float lat, lon;
@@ -158,7 +223,19 @@ class ConfigCallback : public NimBLECharacteristicCallbacks {
     memcpy(receptorMAC, tempMac, 6);
 
     salvarConfig();
+    logConfigSalva();
     novaConfigRecebida = true;
+  }
+};
+
+//////////////////// CALLBACK DE CONEXÃO BLE //////////////////////////
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer *pServer) {
+    Serial.println("[LOG] Dispositivo conectado ao servidor BLE.");
+  }
+
+  void onDisconnect(NimBLEServer *pServer) {
+    Serial.println("[LOG] Dispositivo desconectado do servidor BLE.");
   }
 };
 
@@ -169,6 +246,7 @@ void iniciarBLEConfig() {
   NimBLEDevice::init("TX-VINHA");
 
   NimBLEServer *server = NimBLEDevice::createServer();
+  server->setCallbacks(new ServerCallbacks());
   Serial.println("[BLE] Servidor BLE criado.");
 
   NimBLEService *service = server->createService(TX_SERVICE_UUID);
@@ -176,7 +254,7 @@ void iniciarBLEConfig() {
 
   configCharacteristic = service->createCharacteristic(
     TX_CHAR_UUID,
-    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
+    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR // Aceita WRITE e WRITE WITHOUT RESPONSE
   );
   Serial.println("[BLE] Característica BLE criada com UUID: " + String(TX_CHAR_UUID));
 
@@ -235,16 +313,23 @@ bool iniciarEspNow() {
 
 //////////////////// SETUP /////////////////////////////////
 void setup() {
-  Serial.begin(115200);
-  delay(500);
+    Serial.begin(115200);
+    delay(500);
 
-  Serial.println("\n========== TRANSMISSOR ==========");
+    // Inicializar a EEPROM
+    if (!EEPROM.begin(EEPROM_SIZE)) {
+        Serial.println("[ERRO] Falha ao inicializar EEPROM.");
+        while (true);
+    }
 
-  dht.begin();
-  carregarConfig();
+    Serial.println("\n========== TRANSMISSOR ==========");
 
-  iniciarBLEConfig();
-  configStartMillis = millis();
+    dht.begin();
+    logEstadoMemoria();
+    carregarConfig();
+
+    iniciarBLEConfig();
+    configStartMillis = millis();
 }
 
 //////////////////// LOOP /////////////////////////////////
@@ -252,6 +337,8 @@ void loop() {
 
   // ---------------- MODO CONFIG -----------------
   if (modoAtual == MODO_CONFIG) {
+
+    logBLEConexao(); // Adiciona log para verificar conexão BLE
 
     if (novaConfigRecebida) {
       Serial.println("Config BLE recebida! Entrando em modo RUN...");
@@ -293,6 +380,9 @@ void loop() {
   Serial.printf("Umidade: %.2f\n", umidadeAr);
   Serial.printf("Solo ADC: %d\n", soloADC);
   Serial.printf("Bateria: %.2f V\n", batVoltage);
+
+  // Adiciona mensagem para indicar que o ESP está funcionando
+  Serial.println("[LOG] ESP funcionando corretamente no loop RUN.");
 
   delay(2000);
 }

@@ -128,7 +128,12 @@ btnTx.onclick = async () => {
     const payload = `${masterMac};${name};${latStr};${lonStr}`;
 
     log(`[APP] Enviando dados: ${payload}`);
-    await charac.writeValue(new TextEncoder().encode(payload));
+
+    // Converter a string para um buffer binário
+    const encoder = new TextEncoder();
+    const binaryPayload = encoder.encode(payload);
+
+    await charac.writeValue(binaryPayload);
     log("[APP] Dados enviados com sucesso!");
   } catch (e) {
     log(`[ERRO] Falha na comunicação BLE: ${e}`, true);
