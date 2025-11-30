@@ -1,3 +1,4 @@
+// Inclui as bibliotecas necessárias para funcionalidades específicas, como WiFi, ESP-NOW, sensores DHT, armazenamento em flash e BLE.
 #include <WiFi.h>
 #include <esp_now.h>
 #include <DHT.h>
@@ -7,50 +8,63 @@
 #include <EEPROM.h>
 
 //////////////////////////// PINOS ////////////////////////////
+// Define os pinos para o sensor DHT, sensor de solo e bateria.
 #define DHTPIN 22
 #define DHTTYPE DHT11
 #define SOIL_PIN 32
 #define BAT_PIN 34
 
+// Inicializa o sensor DHT com o pino e tipo especificados.
 DHT dht(DHTPIN, DHTTYPE);
 
 //////////////////// STRUCT ESP-NOW ///////////////////////////
+// Define uma estrutura para armazenar os dados que serão enviados via ESP-NOW.
 typedef struct {
-  float temperatura;
-  float umidadeAr;
-  int   soloADC;
-  float tensaoBat;
+  float temperatura; // Temperatura medida pelo sensor DHT.
+  float umidadeAr;   // Umidade do ar medida pelo sensor DHT.
+  int   soloADC;     // Leitura do sensor de solo (valor ADC).
+  float tensaoBat;   // Tensão da bateria calculada.
 } DadosEnvio;
 
+// Cria uma instância da estrutura para armazenar os dados a serem enviados.
 DadosEnvio pacote;
 
 //////////////////// FLASH (NVS) //////////////////////////////
+// Inicializa a classe Preferences para armazenamento em flash.
 Preferences prefs;
 
-String masterMacStr = "";
-String sensorName   = "";
-float latitudeCfg   = 0;
-float longitudeCfg  = 0;
-bool hasConfig      = false;
+// Variáveis globais para armazenar configurações e estado do dispositivo.
+String masterMacStr = ""; // Endereço MAC do receptor em formato string.
+String sensorName   = ""; // Nome do sensor configurado.
+float latitudeCfg   = 0;  // Latitude configurada.
+float longitudeCfg  = 0;  // Longitude configurada.
+bool hasConfig      = false; // Indica se há configuração salva.
 
+// Array para armazenar o endereço MAC do receptor em formato binário.
 uint8_t receptorMAC[6] = {0};
 
 //////////////////// ESTADOS /////////////////////////////////
+// Define os modos de operação do dispositivo.
 enum Modo { MODO_CONFIG, MODO_RUN };
-Modo modoAtual = MODO_CONFIG;
+Modo modoAtual = MODO_CONFIG; // Define o modo inicial como configuração.
 
+// Variáveis para controlar o tempo de configuração.
 unsigned long configStartMillis = 0;
-const unsigned long CONFIG_WINDOW_MS = 30000;  // 30s para reconfig
+const unsigned long CONFIG_WINDOW_MS = 30000;  // 30 segundos para reconfiguração.
 
+// Flag para indicar se uma nova configuração foi recebida.
 bool novaConfigRecebida = false;
 
 //////////////////// UUIDS (ALINHADOS COM SEU APP) /////////////
+// Define os UUIDs para o serviço e característica BLE.
 #define TX_SERVICE_UUID     "0000aaaa-0000-1000-8000-00805f9b34fb"
 #define TX_CHAR_UUID        "0000aa01-0000-1000-8000-00805f9b34fb"
 
+// Ponteiro para a característica BLE usada para configuração.
 NimBLECharacteristic *configCharacteristic;
 
 //////////////////// FUNÇÕES AUXILIARES ///////////////////////
+// Função para converter uma string de MAC em um array de bytes.
 bool parseMacString(const String &str, uint8_t mac[6]) {
   int b[6];
   if (sscanf(str.c_str(), "%x:%x:%x:%x:%x:%x",
@@ -61,6 +75,7 @@ bool parseMacString(const String &str, uint8_t mac[6]) {
   return false;
 }
 
+// Função para analisar uma string de configuração e extrair os valores.
 bool parseConfigString(const String &s, String &macStr, String &nome, float &lat, float &lon) {
   int p1 = s.indexOf(';');
   int p2 = s.indexOf(';', p1 + 1);
@@ -76,11 +91,12 @@ bool parseConfigString(const String &s, String &macStr, String &nome, float &lat
   return true;
 }
 
-// Forward declarations
+// Declaração antecipada de funções auxiliares.
 void salvarConfig();
 void logConfigSalva();
 
-// Trata payload de configuracao (string recebida) e retorna true se salvou com sucesso.
+// Função para processar o payload de configuração recebido via BLE.
+// Retorna true se a configuração foi salva com sucesso.
 bool processarPayloadConfig(const String &s) {
   if (s.length() == 0) {
     Serial.println("[ERRO] Payload de config vazio.");
@@ -90,11 +106,12 @@ bool processarPayloadConfig(const String &s) {
   String macStr, nome;
   float lat = 0, lon = 0;
 
+  // Tenta analisar a string completa de configuração.
   bool formatoCompleto = parseConfigString(s, macStr, nome, lat, lon);
 
   uint8_t tempMac[6];
   if (!formatoCompleto) {
-    // Fallback: aceita payload apenas com o MAC para contornar clientes com MTU baixo.
+    // Caso o formato completo não seja válido, tenta usar apenas o MAC.
     int sep = s.indexOf(';');
     macStr = (sep == -1) ? s : s.substring(0, sep);
     macStr.trim();
@@ -107,6 +124,7 @@ bool processarPayloadConfig(const String &s) {
     lat = 0;
     lon = 0;
   } else {
+    // Caso o formato completo seja válido, analisa os dados recebidos.
     if (!parseMacString(macStr, tempMac)) {
       Serial.println("[ERRO] MAC invalido!");
       return false;
@@ -119,6 +137,7 @@ bool processarPayloadConfig(const String &s) {
     Serial.print("Lon: "); Serial.println(lon);
   }
 
+  // Atualiza as variáveis globais com os dados recebidos.
   masterMacStr = macStr;
   sensorName   = nome;
   latitudeCfg  = lat;
@@ -130,8 +149,9 @@ bool processarPayloadConfig(const String &s) {
   return true;
 }
 
-#define EEPROM_SIZE 64  // Tamanho da EEPROM
+#define EEPROM_SIZE 64  // Define o tamanho da EEPROM.
 
+// Função para salvar o endereço MAC na EEPROM.
 void salvarMACNaEEPROM(const uint8_t mac[6]) {
     for (int i = 0; i < 6; i++) {
         EEPROM.write(i, mac[i]);
@@ -140,12 +160,13 @@ void salvarMACNaEEPROM(const uint8_t mac[6]) {
     Serial.println("MAC salvo na EEPROM.");
 }
 
+// Função para carregar o endereço MAC da EEPROM.
 bool carregarMACDaEEPROM(uint8_t mac[6]) {
     for (int i = 0; i < 6; i++) {
         mac[i] = EEPROM.read(i);
     }
 
-    // Verificar se o MAC é válido (não vazio)
+    // Verifica se o MAC é válido (não vazio).
     for (int i = 0; i < 6; i++) {
         if (mac[i] != 0xFF) {
             return true;
@@ -154,6 +175,7 @@ bool carregarMACDaEEPROM(uint8_t mac[6]) {
     return false;
 }
 
+// Função para carregar a configuração salva na EEPROM.
 void carregarConfig() {
   Serial.println("Carregando configuração...");
 
@@ -171,6 +193,7 @@ void carregarConfig() {
   }
 }
 
+// Função para salvar a configuração na EEPROM.
 void salvarConfig() {
   Serial.println("Salvando configuração...");
 
@@ -184,6 +207,7 @@ void salvarConfig() {
 }
 
 //////////////////// LOGS DETALHADOS //////////////////////////
+// Função para verificar o estado da memória EEPROM e logar o MAC salvo.
 void logEstadoMemoria() {
     Serial.println("[LOG] Verificando estado da memória EEPROM...");
     uint8_t mac[6];
@@ -198,16 +222,19 @@ void logEstadoMemoria() {
     }
 }
 
+// Função para logar o pacote recebido via BLE.
 void logPacoteRecebido(const String &s) {
     Serial.println("[LOG] Pacote recebido via BLE:");
     Serial.println(s);
 }
 
+// Função para logar que a configuração foi salva com sucesso.
 void logConfigSalva() {
     Serial.println("[LOG] Configuração salva na EEPROM com sucesso.");
 }
 
 //////////////////// LOGS DE CONEXÃO BLE //////////////////////////
+// Função para verificar o estado da conexão BLE.
 void logBLEConexao() {
     Serial.println("[LOG] Verificando conexão BLE...");
     if (NimBLEDevice::getServer()->getConnectedCount() > 0) {
@@ -218,6 +245,7 @@ void logBLEConexao() {
 }
 
 //////////////////// CONFIGURAR MTU //////////////////////////
+// Função para configurar o MTU (Maximum Transmission Unit) para pacotes BLE.
 void configurarMTU() {
     NimBLEDevice::setMTU(256); // Define o MTU para suportar pacotes maiores
     Serial.println("[LOG] MTU configurado para 256 bytes.");
