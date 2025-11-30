@@ -76,6 +76,60 @@ bool parseConfigString(const String &s, String &macStr, String &nome, float &lat
   return true;
 }
 
+// Forward declarations
+void salvarConfig();
+void logConfigSalva();
+
+// Trata payload de configuracao (string recebida) e retorna true se salvou com sucesso.
+bool processarPayloadConfig(const String &s) {
+  if (s.length() == 0) {
+    Serial.println("[ERRO] Payload de config vazio.");
+    return false;
+  }
+
+  String macStr, nome;
+  float lat = 0, lon = 0;
+
+  bool formatoCompleto = parseConfigString(s, macStr, nome, lat, lon);
+
+  uint8_t tempMac[6];
+  if (!formatoCompleto) {
+    // Fallback: aceita payload apenas com o MAC para contornar clientes com MTU baixo.
+    int sep = s.indexOf(';');
+    macStr = (sep == -1) ? s : s.substring(0, sep);
+    macStr.trim();
+    if (!parseMacString(macStr, tempMac)) {
+      Serial.println("[ERRO] Formato invalido. Esperado: MAC;NOME;LAT;LON ou apenas MAC.");
+      return false;
+    }
+    Serial.println("[BLE] Payload curto recebido; usando apenas o MAC.");
+    nome = "";
+    lat = 0;
+    lon = 0;
+  } else {
+    if (!parseMacString(macStr, tempMac)) {
+      Serial.println("[ERRO] MAC invalido!");
+      return false;
+    }
+
+    Serial.println("[BLE] Dados validos recebidos:");
+    Serial.println("MAC: " + macStr);
+    Serial.println("Nome: " + nome);
+    Serial.print("Lat: "); Serial.println(lat);
+    Serial.print("Lon: "); Serial.println(lon);
+  }
+
+  masterMacStr = macStr;
+  sensorName   = nome;
+  latitudeCfg  = lat;
+  longitudeCfg = lon;
+  memcpy(receptorMAC, tempMac, 6);
+  salvarConfig();
+  logConfigSalva();
+  novaConfigRecebida = true;
+  return true;
+}
+
 #define EEPROM_SIZE 64  // Tamanho da EEPROM
 
 void salvarMACNaEEPROM(const uint8_t mac[6]) {
@@ -171,6 +225,7 @@ void configurarMTU() {
 
 //////////////////// CALLBACK BLE ////////////////////////////
 class ConfigCallback : public NimBLECharacteristicCallbacks {
+public:
   void onWrite(NimBLECharacteristic *pCharacteristic) {
     Serial.println("[LOG] Callback BLE acionado. Verificando pacote recebido...");
 
@@ -183,66 +238,34 @@ class ConfigCallback : public NimBLECharacteristicCallbacks {
     }
 
     Serial.printf("[LOG] Pacote recebido com %d bytes: %s\n", s.length(), s.c_str());
+    Serial.print("[LOG] Pacote (hex): ");
+    for (size_t i = 0; i < value.size(); i++) {
+      Serial.printf("%02X ", (uint8_t)value[i]);
+    }
+    Serial.println();
 
     logPacoteRecebido(s);
 
-    String macStr, nome;
-    float lat = 0, lon = 0;
-
-    bool formatoCompleto = parseConfigString(s, macStr, nome, lat, lon);
-
-    uint8_t tempMac[6];
-    if (!formatoCompleto) {
-      // Fallback: aceita payload apenas com o MAC para contornar clientes com MTU baixo
-      // (ex.: write without response no Web Bluetooth limita o tamanho em ~20 bytes).
-      int sep = s.indexOf(';');
-      macStr = (sep == -1) ? s : s.substring(0, sep);
-      macStr.trim();
-      if (!parseMacString(macStr, tempMac)) {
-        Serial.println("[ERRO] Formato invalido. Esperado: MAC;NOME;LAT;LON ou apenas MAC.");
-        return;
-      }
-      Serial.println("[BLE] Payload curto recebido; usando apenas o MAC.");
-      nome = "";
-      lat = 0;
-      lon = 0;
-    } else {
-      if (!parseMacString(macStr, tempMac)) {
-        Serial.println("[ERRO] MAC invalido!");
-        return;
-      }
-
-      Serial.println("[BLE] Dados validos recebidos:");
-      Serial.println("MAC: " + macStr);
-      Serial.println("Nome: " + nome);
-      Serial.print("Lat: "); Serial.println(lat);
-      Serial.print("Lon: "); Serial.println(lon);
-    }
-
-    masterMacStr = macStr;
-    sensorName   = nome;
-    latitudeCfg  = lat;
-    longitudeCfg = lon;
-    memcpy(receptorMAC, tempMac, 6);
-    salvarConfig();
-    logConfigSalva();
-    novaConfigRecebida = true;
+    processarPayloadConfig(s);
   }
 };
 
 //////////////////// CALLBACK DE CONEXÃO BLE //////////////////////////
 class ServerCallbacks : public NimBLEServerCallbacks {
+public:
   void onConnect(NimBLEServer *pServer) {
     Serial.println("[LOG] Dispositivo conectado ao servidor BLE.");
   }
 
   void onDisconnect(NimBLEServer *pServer) {
     Serial.println("[LOG] Dispositivo desconectado do servidor BLE.");
+    NimBLEDevice::startAdvertising(); // retoma advertising para novo app
   }
 };
 
 //////////////////// CALLBACK GLOBAL BLE //////////////////////////
 class GlobalServerCallbacks : public NimBLEServerCallbacks {
+public:
   void onWrite(NimBLECharacteristic *pCharacteristic) {
     Serial.println("[LOG] Evento de escrita capturado no servidor BLE.");
 
@@ -274,7 +297,8 @@ void iniciarBLEConfig() {
 
   configCharacteristic = service->createCharacteristic(
     TX_CHAR_UUID,
-    NIMBLE_PROPERTY::WRITE // usar somente write com resposta para evitar truncar payloads maiores
+    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR, // compatibilidade: write com e sem resposta
+    128 // aumenta maxLen para caber string grande
   );
   Serial.println("[BLE] Característica BLE criada com UUID: " + String(TX_CHAR_UUID));
 
@@ -357,6 +381,20 @@ void loop() {
   // ---------------- MODO CONFIG -----------------
   if (modoAtual == MODO_CONFIG) {
 
+    // Fallback: se o callback nao disparar, tenta ler a caracteristica e processar
+    static String ultimoPayload = "";
+    if (configCharacteristic != nullptr && !novaConfigRecebida) {
+      std::string raw = configCharacteristic->getValue();
+      if (!raw.empty()) {
+        String s(raw.c_str());
+        if (s != ultimoPayload) {
+          Serial.println("[LOG] Detectado valor na caracteristica (polling). Processando...");
+          processarPayloadConfig(s);
+          ultimoPayload = s;
+        }
+      }
+    }
+
     if (novaConfigRecebida) {
       Serial.println("Config BLE recebida! Entrando em modo RUN...");
       pararBLEConfig();
@@ -373,7 +411,14 @@ void loop() {
       return;
     }
 
-    // Removido o delay e os logs repetitivos
+    // Log BLE periódico para verificar se houve conexão na janela de configuração
+    static unsigned long ultimoLogBLE = 0;
+    if (millis() - ultimoLogBLE > 5000) {
+      int conexoes = NimBLEDevice::getServer()->getConnectedCount();
+      Serial.printf("[LOG] Aguardando config BLE. Conexoes ativas: %d\n", conexoes);
+      ultimoLogBLE = millis();
+    }
+
     return;
   }
 
