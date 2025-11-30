@@ -1,10 +1,9 @@
-// Inclui as bibliotecas necessárias para funcionalidades específicas, como WiFi, ESP-NOW, sensores DHT, armazenamento em flash e BLE.
+// Removed unused includes and cleaned up the code.
 #include <WiFi.h>
 #include <esp_now.h>
 #include <DHT.h>
 #include <Preferences.h>
 #include <NimBLEDevice.h>
-#include <nvs_flash.h>
 #include <EEPROM.h>
 
 //////////////////////////// PINOS ////////////////////////////
@@ -24,6 +23,9 @@ typedef struct {
   float umidadeAr;   // Umidade do ar medida pelo sensor DHT.
   int   soloADC;     // Leitura do sensor de solo (valor ADC).
   float tensaoBat;   // Tensão da bateria calculada.
+  char  nome[32];    // Nome do sensor.
+  float latitude;     // Latitude configurada.
+  float longitude;    // Longitude configurada.
 } DadosEnvio;
 
 // Cria uma instância da estrutura para armazenar os dados a serem enviados.
@@ -149,22 +151,32 @@ bool processarPayloadConfig(const String &s) {
   return true;
 }
 
-#define EEPROM_SIZE 64  // Define o tamanho da EEPROM.
+#define EEPROM_SIZE 128  // Define o tamanho da EEPROM.
 
-// Função para salvar o endereço MAC na EEPROM.
-void salvarMACNaEEPROM(const uint8_t mac[6]) {
+// Função para salvar os dados na EEPROM.
+void salvarDadosNaEEPROM(const uint8_t mac[6], const char *nome, float latitude, float longitude) {
     for (int i = 0; i < 6; i++) {
         EEPROM.write(i, mac[i]);
     }
+    for (int i = 0; i < 32; i++) {
+        EEPROM.write(6 + i, nome[i]);
+    }
+    EEPROM.put(38, latitude);
+    EEPROM.put(42, longitude);
     EEPROM.commit();
-    Serial.println("MAC salvo na EEPROM.");
+    Serial.println("Dados salvos na EEPROM.");
 }
 
-// Função para carregar o endereço MAC da EEPROM.
-bool carregarMACDaEEPROM(uint8_t mac[6]) {
+// Função para carregar os dados da EEPROM.
+bool carregarDadosDaEEPROM(uint8_t mac[6], char *nome, float &latitude, float &longitude) {
     for (int i = 0; i < 6; i++) {
         mac[i] = EEPROM.read(i);
     }
+    for (int i = 0; i < 32; i++) {
+        nome[i] = EEPROM.read(6 + i);
+    }
+    EEPROM.get(38, latitude);
+    EEPROM.get(42, longitude);
 
     // Verifica se o MAC é válido (não vazio).
     for (int i = 0; i < 6; i++) {
@@ -179,7 +191,7 @@ bool carregarMACDaEEPROM(uint8_t mac[6]) {
 void carregarConfig() {
   Serial.println("Carregando configuração...");
 
-  if (carregarMACDaEEPROM(receptorMAC)) {
+  if (carregarDadosDaEEPROM(receptorMAC, (char*)sensorName.c_str(), latitudeCfg, longitudeCfg)) {
       hasConfig = true;
       Serial.println("Config encontrada na EEPROM:");
       Serial.print("Master MAC: ");
@@ -198,7 +210,7 @@ void salvarConfig() {
   Serial.println("Salvando configuração...");
 
   if (masterMacStr.length() > 0 && parseMacString(masterMacStr, receptorMAC)) {
-          salvarMACNaEEPROM(receptorMAC);
+          salvarDadosNaEEPROM(receptorMAC, sensorName.c_str(), latitudeCfg, longitudeCfg);
           hasConfig = true;
           Serial.println("Config SALVA com sucesso na EEPROM!");
     } else {
@@ -211,7 +223,7 @@ void salvarConfig() {
 void logEstadoMemoria() {
     Serial.println("[LOG] Verificando estado da memória EEPROM...");
     uint8_t mac[6];
-    if (carregarMACDaEEPROM(mac)) {
+    if (carregarDadosDaEEPROM(mac, (char*)sensorName.c_str(), latitudeCfg, longitudeCfg)) {
         Serial.print("[LOG] MAC encontrado na EEPROM: ");
         for (int i = 0; i < 6; i++) {
             Serial.printf("%02X:", mac[i]);
@@ -458,6 +470,9 @@ void loop() {
   int batRaw = analogRead(BAT_PIN);
   float batVoltage = batRaw * (4.2 / 4095.0);
 
+  strcpy(pacote.nome, sensorName.c_str());
+  pacote.latitude = latitudeCfg;
+  pacote.longitude = longitudeCfg;
   pacote.temperatura = temperatura;
   pacote.umidadeAr   = umidadeAr;
   pacote.soloADC     = soloADC;
@@ -465,13 +480,8 @@ void loop() {
 
   esp_now_send(receptorMAC, (uint8_t *)&pacote, sizeof(pacote));
 
-  Serial.println("---------------");
-  Serial.printf("Temp: %.2f\n", temperatura);
-  Serial.printf("Umidade: %.2f\n", umidadeAr);
-  Serial.printf("Solo ADC: %d\n", soloADC);
-  Serial.printf("Bateria: %.2f V\n", batVoltage);
-
-  // Removido o log repetitivo do loop RUN
+  Serial.printf("Temp: %.2f, Umidade: %.2f, Solo: %d, Bateria: %.2fV, Nome: %s, Lat: %.6f, Lon: %.6f\n",
+                temperatura, umidadeAr, soloADC, batVoltage, pacote.nome, pacote.latitude, pacote.longitude);
 }
 
 
